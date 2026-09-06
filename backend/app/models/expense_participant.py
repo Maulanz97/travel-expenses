@@ -8,11 +8,11 @@ class ExpenseParticipant(Base):
     id = Column(Integer, primary_key=True, index=True)
     expense_id = Column(
         Integer,
-        ForeignKey("expenses.id"),
+        ForeignKey("expenses.id", ondelete="CASCADE"),
         nullable=False
     )
     user_id = Column(
         Integer,
-        ForeignKey("users.id"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False
     )

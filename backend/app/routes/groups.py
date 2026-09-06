@@ -52,7 +52,10 @@ def create_group(group: GroupCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_member)
 
-    return new_group
+    return {
+        "id": new_group.id,
+        "name": new_group.name,
+    }
 
 @router.get("/")
 def get_groups(db: Session = Depends(get_db)):

@@ -9,5 +9,13 @@ class Expense(Base):
     description = Column(String, nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
 
-    payer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    group_id = Column(Integer, ForeignKey("groups.id"), nullable=False)
+    payer_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    group_id = Column(
+        Integer,
+        ForeignKey("groups.id", ondelete="CASCADE"),
+        nullable=False,
+    )
