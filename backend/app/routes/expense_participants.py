@@ -26,6 +26,9 @@ def add_participant(
     if expense is None:
         return {"message": "Expense not found"}
 
+    if expense.custom_shares is not None:
+        return {'message': 'Edit the expense to change custom participants'}
+
     user = db.query(User).filter(
         User.id == participant.user_id
     ).first()

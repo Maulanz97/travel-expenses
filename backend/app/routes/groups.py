@@ -1,16 +1,20 @@
 from fastapi import APIRouter, Depends
+from decimal import Decimal
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from app.auth import visible_group_ids
 
 from app.database import get_db
 from app.models.group import Group
 from app.models.group_member import GroupMember
 from app.models.user import User
 from app.schemas.group import GroupCreate, GroupUpdate
+from app.models.payment import Payment
 from app.models.expense import Expense
 from app.models.expense_participant import ExpenseParticipant
 
 from app.services.expense_service import (
-    calculate_group_balances,
+    calculate_balances,
     calculate_settlements
 )
 
@@ -29,28 +33,35 @@ def get_group_or_none(
 
 @router.post("/")
 def create_group(group: GroupCreate, db: Session = Depends(get_db)):
-    owner = db.query(User).filter(User.id == group.owner_id).first()
+    actor = db.info.get('actor')
+    if actor:
+        group = group.model_copy(update={'owner_id': actor.id, 'organizer': None})
+    owner = db.get(User, group.owner_id) if group.owner_id else None
 
-    if owner is None:
+    if group.owner_id and owner is None:
         return {"message": "Owner not found"}
 
     new_group = Group(
         name=group.name
     )
 
-    db.add(new_group)
-    db.commit()
-    db.refresh(new_group)
-
-    new_member = GroupMember(
-        user_id=group.owner_id,
-        group_id=new_group.id,
-        role="owner"
-    )
-
-    db.add(new_member)
-    db.commit()
-    db.refresh(new_member)
+    try:
+        if group.organizer:
+            owner = User(**group.organizer.model_dump())
+            db.add(owner)
+            db.flush()
+        db.add(new_group)
+        # Allocate the ID; persist the trip only together with its organizer.
+        db.flush()
+        db.add(GroupMember(
+            user_id=owner.id,
+            group_id=new_group.id,
+            role="owner"
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "id": new_group.id,
@@ -59,9 +70,12 @@ def create_group(group: GroupCreate, db: Session = Depends(get_db)):
 
 @router.get("/")
 def get_groups(db: Session = Depends(get_db)):
-    groups = db.query(Group).all()
-
-    return groups
+    query = db.query(Group, func.count(GroupMember.id)).outerjoin(GroupMember, GroupMember.group_id == Group.id)
+    actor = db.info.get('actor')
+    if actor:
+        query = query.filter(Group.id.in_(visible_group_ids(db, actor)))
+    rows = query.group_by(Group.id).all()
+    return [{'id': group.id, 'name': group.name, 'member_count': count} for group, count in rows]
 
 @router.get("/{group_id}")
 def get_group(group_id: int, db: Session = Depends(get_db)):
@@ -104,7 +118,7 @@ def delete_group(group_id: int, db: Session = Depends(get_db)):
 
 def get_group_expenses_data(group_id: int, db: Session):
     expenses = db.query(Expense).filter(
-        Expense.group_id == group_id
+        Expense.group_id == group_id, Expense.voided == False
     ).all()
 
     if not expenses:
@@ -125,7 +139,12 @@ def get_group_expenses_data(group_id: int, db: Session):
 
     return [
         {
+            "id": expense.id,
+            "description": expense.description,
+            "expense_date": expense.expense_date,
             "amount": expense.amount,
+            "custom_shares": expense.custom_shares,
+            "payer_contributions": expense.payer_contributions,
             "payer_id": expense.payer_id,
             "participants": participants_by_expense.get(
                 expense.id, []
@@ -133,6 +152,46 @@ def get_group_expenses_data(group_id: int, db: Session):
         }
         for expense in expenses
     ]
+
+def balances_with_payments(group_id, expenses_data, db):
+    return {user_id: row['balance'] for user_id, row in balance_breakdowns(group_id, expenses_data, db).items()}
+
+
+def balance_breakdowns(group_id, expenses_data, db, include_movements=False):
+    rows = {}
+
+    def row(user_id):
+        result = rows.setdefault(user_id, dict.fromkeys(
+            ('expenses_paid', 'expense_share', 'payments_sent', 'payments_received'), Decimal('0.00')
+        ))
+        if include_movements:
+            result.setdefault('movements', {key: [] for key in ('expenses_paid', 'expense_share', 'payments_sent', 'payments_received')})
+        return result
+
+    for expense in expenses_data:
+        if not expense['participants']:
+            continue
+        for item in calculate_balances(expense['amount'], expense['payer_id'], expense['participants'], expense.get('custom_shares'), expense.get('payer_contributions')):
+            row(item['user_id'])['expenses_paid'] += item['paid']
+            row(item['user_id'])['expense_share'] += item['share']
+            if include_movements:
+                for key, value in (('expenses_paid', item['paid']), ('expense_share', item['share'])):
+                    if value or (key == 'expense_share' and item['user_id'] in expense['participants']):
+                        row(item['user_id'])['movements'][key].append(dict(id=expense['id'], description=expense['description'], date=expense['expense_date'], amount=value))
+    names = dict(db.query(User.id, User.name).all()) if include_movements else {}
+    for payment in db.query(Payment).filter_by(group_id=group_id, voided=False).all():
+        row(payment.from_user_id)['payments_sent'] += payment.amount
+        row(payment.to_user_id)['payments_received'] += payment.amount
+        if include_movements:
+            row(payment.from_user_id)['movements']['payments_sent'].append(dict(id=payment.id, description=f"Pago a {names.get(payment.to_user_id, 'integrante')}", date=payment.payment_date, amount=payment.amount))
+            row(payment.to_user_id)['movements']['payments_received'].append(dict(id=payment.id, description=f"Pago de {names.get(payment.from_user_id, 'integrante')}", date=payment.payment_date, amount=payment.amount))
+    for item in rows.values():
+        item['balance'] = item['expenses_paid'] - item['expense_share'] + item['payments_sent'] - item['payments_received']
+        if include_movements:
+            for movements in item['movements'].values():
+                movements.sort(key=lambda movement: (str(movement['date'] or ''), movement['id']), reverse=True)
+    return rows
+
 
 @router.get("/{group_id}/balances")
 def get_group_balances(
@@ -146,9 +205,8 @@ def get_group_balances(
 
     expenses_data = get_group_expenses_data(group_id, db)
 
-    balances = calculate_group_balances(
-        expenses_data
-    )
+    breakdowns = balance_breakdowns(group_id, expenses_data, db, include_movements=True)
+    balances = {user_id: item['balance'] for user_id, item in breakdowns.items()}
 
     user_ids = list(balances.keys())
 
@@ -169,7 +227,9 @@ def get_group_balances(
         result.append({
             "user_id": user.id,
             "name": user.name,
-            "balance": balance
+            "balance": balance,
+            "breakdown": {key: value for key, value in breakdowns[user_id].items() if key != 'movements'},
+            "movements": breakdowns[user_id]['movements']
         })
 
     return result
@@ -186,9 +246,7 @@ def get_group_settlements(
 
     expenses_data = get_group_expenses_data(group_id, db)
 
-    balances = calculate_group_balances(
-        expenses_data
-    )
+    balances = balances_with_payments(group_id, expenses_data, db)
 
     settlements = calculate_settlements(
         balances
@@ -229,4 +287,3 @@ def get_group_settlements(
         })
 
     return result
-

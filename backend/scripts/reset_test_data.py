@@ -1,15 +1,18 @@
-"""Safely clear Travel Expenses test data without changing the SQLite schema."""
+"""Clear test data, or explicitly rebuild the local database from current migrations."""
 
 from __future__ import annotations
 
 import argparse
 import sqlite3
 import sys
+import tempfile
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
 
 TABLES_TO_CLEAR = (
+    "payments",
     "expense_participants",
     "expenses",
     "group_members",
@@ -74,6 +77,25 @@ def clear_data(database_path: Path) -> tuple[Path, dict[str, int]]:
         connection.close()
 
 
+def rebuild_database(database_path: Path):
+    """Build a fresh schema first, then atomically copy it into the local database."""
+    from alembic import command
+    from alembic.config import Config
+    root = Path(__file__).resolve().parents[1]
+    if database_path.resolve() != root / 'expenses.db':
+        raise RuntimeError('Schema rebuild is restricted to backend/expenses.db.')
+    with tempfile.TemporaryDirectory() as directory:
+        fresh = Path(directory) / 'fresh.db'
+        config = Config(str(root / 'alembic.ini'))
+        config.set_main_option('script_location', str(root / 'alembic'))
+        config.set_main_option('sqlalchemy.url', f'sqlite:///{fresh.as_posix()}')
+        command.upgrade(config, 'head')
+        backup = create_backup(database_path) if database_path.exists() else None
+        with closing(sqlite3.connect(fresh)) as source, closing(sqlite3.connect(database_path)) as target:
+            source.backup(target)
+        print(f'Fresh database ready. Previous backup: {backup}')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Clear local test data while preserving the SQLite schema."
@@ -88,8 +110,14 @@ def main() -> int:
         action="store_true",
         help="Required to create a backup and delete the test records.",
     )
+    parser.add_argument('--rebuild', action='store_true', help='Recreate the local schema from the consolidated migration; requires --confirm.')
     arguments = parser.parse_args()
     database_path = arguments.database.resolve()
+    if arguments.rebuild:
+        if not arguments.confirm:
+            parser.error('--rebuild requires --confirm; all local records will be removed.')
+        rebuild_database(database_path)
+        return 0
     if not database_path.is_file():
         print(f"Database not found: {database_path}", file=sys.stderr)
         return 1

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean
 from app.database import Base
 
 
@@ -17,3 +17,4 @@ class GroupMember(Base):
         nullable=False,
     )
     role = Column(String, nullable=False)
+    can_register_expenses = Column(Boolean, nullable=False, default=False, server_default='0')

@@ -4,8 +4,11 @@ from app.services.group_service import get_group_membership
 def calculate_shares(
     amount: Decimal,
     payer_id: int,
-    participants: list[int]
+    participants: list[int],
+    custom_shares=None
 ):
+    if custom_shares is not None:
+        return {int(user_id): int(Decimal(str(value)) * 100) for user_id, value in custom_shares.items()}
     if len(participants) == 0:
         return {
             "message": "At least one participant is required"
@@ -44,12 +47,13 @@ def calculate_shares(
 def calculate_equal_split(
     amount: Decimal,
     payer_id: int,
-    participants: list[int]
+    participants: list[int],
+    custom_shares=None
 ):
     shares = calculate_shares(
         amount=amount,
         payer_id=payer_id,
-        participants=participants
+        participants=participants, custom_shares=custom_shares
     )
 
     if isinstance(shares, dict) and "message" in shares:
@@ -75,80 +79,38 @@ def calculate_equal_split(
 def calculate_balances(
     amount: Decimal,
     payer_id: int,
-    participants: list[int]
+    participants: list[int],
+    custom_shares=None,
+    payer_contributions=None
 ):
     shares = calculate_shares(
         amount=amount,
         payer_id=payer_id,
-        participants=participants
+        participants=participants, custom_shares=custom_shares
     )
 
     if isinstance(shares, dict) and "message" in shares:
         return shares
 
-    balances = []
+    paid = {int(k): Decimal(str(v)) for k, v in (payer_contributions or {payer_id: amount}).items()}
+    return [dict(user_id=user_id, paid=paid.get(user_id, Decimal('0.00')),
+                 share=Decimal(shares.get(user_id, 0)) / 100,
+                 balance=paid.get(user_id, Decimal('0.00')) - Decimal(shares.get(user_id, 0)) / 100)
+            for user_id in dict.fromkeys([*participants, *paid])]
 
-    for user_id in participants:
-        share = Decimal(shares[user_id]) / Decimal("100")
-
-        balances.append({
-            "user_id": user_id,
-            "paid": amount if user_id == payer_id else Decimal("0.00"),
-            "share": share,
-            "balance": (
-                amount - share
-                if user_id == payer_id
-                else -share
-            )
-        })
-
-    # If the payer is not a participant,
-    # they still receive credit for the full amount paid.
-    if payer_id not in participants:
-        balances.append({
-            "user_id": payer_id,
-            "paid": amount,
-            "share": Decimal("0.00"),
-            "balance": amount
-        })
-
-    return balances
 
 def calculate_group_balances(expenses_data):
     balances = {}
-
     for expense in expenses_data:
-        amount = Decimal(expense["amount"])
-        payer_id = expense["payer_id"]
-        participants = expense["participants"]
-
-        if len(participants) == 0:
+        rows = calculate_balances(Decimal(expense['amount']), expense['payer_id'], expense['participants'],
+                                  expense.get('custom_shares'), expense.get('payer_contributions'))
+        if isinstance(rows, dict):
             continue
-
-        shares = calculate_shares(
-            amount=amount,
-            payer_id=payer_id,
-            participants=participants
-        )
-
-        if isinstance(shares, dict) and "message" in shares:
-            continue
-
-        # Every participant owes their calculated share
-        for user_id in participants:
-            if user_id not in balances:
-                balances[user_id] = Decimal("0.00")
-
-            share = Decimal(shares[user_id]) / Decimal("100")
-            balances[user_id] -= share
-
-        # The payer receives credit for the full amount paid
-        if payer_id not in balances:
-            balances[payer_id] = Decimal("0.00")
-
-        balances[payer_id] += amount
-
+        for item in rows:
+            uid = item['user_id']
+            balances[uid] = balances.get(uid, Decimal('0.00')) + item['balance']
     return balances
+
 
 def calculate_settlements(balances):
     creditors = [
@@ -204,7 +166,8 @@ def validate_expense_participants(
     db,
     group_id: int,
     payer_id: int,
-    participants: list[int]
+    participants: list[int],
+    payer_contributions=None
 ):
     from app.models.user import User
     from app.models.group import Group
@@ -230,6 +193,10 @@ def validate_expense_participants(
 
     if payer_membership is None:
         return "Payer is not a member of this group"
+
+    for extra_payer in (payer_contributions or {}):
+        if get_group_membership(extra_payer, group_id, db) is None:
+            return 'Payer is not a member of this group'
 
     # Check participants
     if len(participants) == 0:

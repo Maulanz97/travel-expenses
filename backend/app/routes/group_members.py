@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
+from app.schemas.user import UserCreate
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -12,6 +14,29 @@ router = APIRouter(
     prefix="/group-members",
     tags=["Group Members"]
 )
+
+@router.post('/group/{group_id}/people')
+def create_member(group_id: int, person: UserCreate, db: Session = Depends(get_db)):
+    if not db.get(Group, group_id):
+        raise HTTPException(404, 'Group not found')
+    if person.email and db.query(User).filter_by(email=person.email).first():
+        raise HTTPException(409, 'Email already registered')
+    try:
+        user = User(**person.model_dump(), created_by_id=db.info['actor'].id if db.info.get('actor') else None)
+        db.add(user)
+        db.flush()
+        db.add(GroupMember(user_id=user.id, group_id=group_id, role='member'))
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(409, 'Could not register person')
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(user)
+    if db.info.get('actor'):
+        return dict(id=user.id, name=user.name, email=user.email, can_edit=True)
+    return user
 
 @router.post("/")
 def add_member(
@@ -69,7 +94,10 @@ def get_group_members(
             "user_id": user.id,
             "name": user.name,
             "email": user.email,
-            "role": member.role
+            "role": member.role,
+            "can_register_expenses": member.can_register_expenses,
+            "login_email": user.login_email,
+            "account_linked": bool(user.auth_subject)
         }
         for member, user in members
     ]
