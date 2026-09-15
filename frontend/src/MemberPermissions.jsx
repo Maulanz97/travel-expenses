@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api, errorMessage } from './api'
+import PersonalInvitation from './PersonalInvitation'
 
 function MemberPermission({ member, groupId, onChanged, onBusy }) {
   const [open, setOpen] = useState(false)
@@ -21,13 +22,13 @@ function MemberPermission({ member, groupId, onChanged, onBusy }) {
   }
   return <div className="member-permission"><p><strong>{member.name}</strong> · {member.role === 'owner' ? 'Organiza' : member.can_register_expenses ? 'Puede registrar gastos' : 'Solo consulta'}</p>
     {member.role !== 'owner' && <button type="button" className="secondary" disabled={pending} aria-expanded={open} onClick={() => setOpen(!open)}>Permisos de {member.name}</button>}
-    {open && <form className="form" onSubmit={save}><fieldset className="pending-fields" disabled={pending}>
+    {open && <><PersonalInvitation member={member} groupId={groupId} onBusy={onBusy} onChanged={onChanged} /><form className="form" onSubmit={save}><fieldset className="pending-fields" disabled={pending}>
       {member.account_linked ? <p>Cuenta vinculada: {member.login_email}</p> : <label>Correo para acceder<input type="email" name="loginEmail" defaultValue={member.login_email || ''} maxLength={320} /></label>}
       <label className="permission-check"><input type="checkbox" name="canRegister" defaultChecked={member.can_register_expenses} />Puede registrar gastos</label>
       <p className="form-help">Con este permiso puede crear gastos y editar o anular los que registró. Los pagos los administra quien organiza.</p>
       {!member.account_linked && <p className="form-help">Este correo vinculará a la persona cuando entre con Google o lo verifique al crear su cuenta. No se envía una invitación automáticamente. Sin correo, puede seguir participando en las cuentas.</p>}
       {error && <p role="alert" className="alert error">{error}</p>}<button className="primary">{pending ? 'Guardando…' : 'Guardar permisos'}</button>
-    </fieldset></form>}
+    </fieldset></form></>}
   </div>
 }
 export default function MemberPermissions({ members, groupId, onChanged, onBusy }) {

@@ -67,7 +67,7 @@ def resolve_identity(identity, db):
 
 
 def visible_group_ids(db, actor):
-    return db.query(GroupMember.group_id).filter_by(user_id=actor.id)
+    return db.query(GroupMember.group_id).filter(or_(GroupMember.user_id == actor.id, GroupMember.access_user_id == actor.id))
 
 
 def visible_users(db, actor):
@@ -76,7 +76,7 @@ def visible_users(db, actor):
 
 
 def membership(db, actor, group_id):
-    result = db.query(GroupMember).filter_by(group_id=group_id, user_id=actor.id).first()
+    result = db.query(GroupMember).filter(GroupMember.group_id == group_id, or_(GroupMember.user_id == actor.id, GroupMember.access_user_id == actor.id)).first()
     if not result:
         raise HTTPException(403, 'Not a member of this trip')
     return result
@@ -91,6 +91,8 @@ def can_manage_person(db, actor, person):
     if not person or person.auth_subject:
         return False
     groups = db.query(GroupMember).filter_by(user_id=person.id).all()
+    if any(member.access_user_id for member in groups):
+        return False
     if not groups:
         return person.created_by_id == actor.id
     owned = {m.group_id for m in db.query(GroupMember).filter_by(user_id=actor.id, role='owner')}
@@ -99,7 +101,7 @@ def can_manage_person(db, actor, person):
 
 async def authorize(request: Request, db: Session = Depends(get_db)):
     if local_development_request(request):
-        if '/access/' in request.scope['route'].path:
+        if '/access/' in request.scope['route'].path or request.scope['route'].path.startswith('/invitations'):
             raise HTTPException(403, 'Account permissions require authentication')
         db.info['local_development'] = True
         return
@@ -133,6 +135,8 @@ async def authorize(request: Request, db: Session = Depends(get_db)):
 
     if route == '/auth/me':
         return
+    if route in ('/invitations/preview', '/invitations/accept') and method == 'POST':
+        return
     if route.startswith('/users'):
         if 'user_id' not in params:
             if method in ('GET', 'POST'):
@@ -142,7 +146,7 @@ async def authorize(request: Request, db: Session = Depends(get_db)):
             raise HTTPException(403, 'Person unavailable')
         if method == 'GET':
             return
-        if method == 'PUT' and can_manage_person(db, actor, target):
+        if method in ('PUT', 'DELETE') and can_manage_person(db, actor, target):
             return
         raise HTTPException(403, 'Person cannot be changed')
     if route == '/groups/':

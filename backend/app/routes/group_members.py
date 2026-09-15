@@ -7,6 +7,10 @@ from app.database import get_db
 from app.models.group import Group
 from app.models.group_member import GroupMember
 from app.models.user import User
+from app.models.expense import Expense
+from app.models.expense_participant import ExpenseParticipant
+from app.models.payment import Payment
+from sqlalchemy import or_
 from app.schemas.group_member import GroupMemberCreate
 
 
@@ -14,6 +18,34 @@ router = APIRouter(
     prefix="/group-members",
     tags=["Group Members"]
 )
+
+@router.delete('/group/{group_id}/people/{user_id}')
+def remove_member(group_id: int, user_id: int, db: Session = Depends(get_db)):
+    if not db.get(Group, group_id):
+        raise HTTPException(404, 'Group not found')
+    members = db.query(GroupMember).filter_by(group_id=group_id, user_id=user_id).all()
+    if any(member.role == 'owner' for member in members):
+        raise HTTPException(409, 'Organizer cannot be removed')
+    if not members:
+        return {'removed': True}
+    # Include voided records: they can be restored and still need their members.
+    participant = db.query(ExpenseParticipant).join(
+        Expense, Expense.id == ExpenseParticipant.expense_id
+    ).filter(Expense.group_id == group_id, ExpenseParticipant.user_id == user_id).first()
+    payer = any(
+        expense.payer_id == user_id or str(user_id) in (expense.payer_contributions or {})
+        for expense in db.query(Expense).filter_by(group_id=group_id)
+    )
+    payment = db.query(Payment).filter(
+        Payment.group_id == group_id,
+        or_(Payment.from_user_id == user_id, Payment.to_user_id == user_id)
+    ).first()
+    if participant or payer or payment:
+        raise HTTPException(409, 'Member has trip transactions')
+    for member in members:
+        db.delete(member)
+    db.commit()
+    return {'removed': True}
 
 @router.post('/group/{group_id}/people')
 def create_member(group_id: int, person: UserCreate, db: Session = Depends(get_db)):
@@ -55,7 +87,7 @@ def add_member(
         return {"message": "Group not found"}
 
     existing_member = db.query(GroupMember).filter(
-        GroupMember.user_id == member.user_id,
+        or_(GroupMember.user_id == member.user_id, GroupMember.access_user_id == member.user_id),
         GroupMember.group_id == member.group_id
     ).first()
 
@@ -96,8 +128,10 @@ def get_group_members(
             "email": user.email,
             "role": member.role,
             "can_register_expenses": member.can_register_expenses,
-            "login_email": user.login_email,
-            "account_linked": bool(user.auth_subject)
+            "login_email": db.get(User, member.access_user_id).login_email if member.access_user_id else user.login_email,
+            "account_linked": bool(user.auth_subject or member.access_user_id),
+            "access_user_id": member.access_user_id,
+            "invitation_pending": bool(member.invite_hash),
         }
         for member, user in members
     ]

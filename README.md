@@ -1,11 +1,42 @@
-# Travel Expenses
+# Viaje Claro · Gastos compartidos
 
-MVP para registrar y dividir gastos de un viaje entre varias personas.
+Aplicación web personal para organizar gastos de un viaje en grupo: registrar quién pagó, repartir importes y consultar cuánto debe o recibe cada integrante.
 
-## Ejecutar localmente
+**Menos tiempo calculando, más tiempo compartiendo.**
+Divide los gastos, multiplica los momentos.
 
-Para trabajar sin configurar Supabase, usa el modo local explícito. Desde la raíz,
-instala las dependencias y crea la base de datos:
+## Funcionalidades
+
+- Viajes e integrantes, con directorio de personas reutilizable.
+- Repartos iguales o personalizados y varios pagadores por gasto.
+- Revisión antes de guardar, fechas, edición, anulación e historial.
+- Pagos parciales, balances con desglose y pagos sugeridos.
+- Resumen en texto con vista previa, copia y menú de compartir compatible.
+- Acceso con Google o correo mediante Supabase Auth.
+- Permisos por viaje e invitaciones personales de un solo uso, con vencimiento de siete días y cancelación. Aceptarlas concede solo consulta.
+- Validaciones para evitar eliminar personas con registros asociados.
+- Identificadores de operación para reintentar gastos y pagos sin duplicarlos.
+
+## Arquitectura y decisiones
+
+```text
+React / Vite ── HTTP / API ── FastAPI ── SQLAlchemy ── SQLite
+     │                         │
+     └── Supabase Auth ─────────┘
+         Inicio de sesión y verificación de identidad
+```
+
+El frontend presenta importes en MXN. El backend valida permisos y calcula repartos con precisión decimal y centavos enteros. Alembic versiona el esquema. Crear un viaje con su organizador y guardar un gasto con sus participantes son operaciones atómicas.
+
+Supabase gestiona la autenticación; los viajes y gastos se guardan en SQLite. Las invitaciones vinculan una cuenta al integrante de un viaje sin fusionar personas ni alterar gastos. Sus tokens se almacenan como hashes.
+
+El proyecto está en desarrollo. Docker, CI/CD y el despliegue en Oracle Cloud están planificados, pero aún no forman parte de esta versión. El acceso desde otros dispositivos requiere desplegar frontend y API con HTTPS y datos persistentes.
+
+## Probar en Windows / PowerShell
+
+Requisitos: Python 3.13, Node.js compatible con Vite 8, npm y Git. Consulta el requisito `engines` del paquete Vite instalado al elegir Node.js.
+
+Desde la raíz del repositorio:
 
 ```powershell
 py -3.13 -m venv .venv
@@ -17,59 +48,50 @@ Set-Location ..
 .\.venv\Scripts\python.exe scripts/start_local.py
 ```
 
-Abre `http://127.0.0.1:5173`. Si los puertos están ocupados, añade
-`--api-port 8001 --port 5179` al lanzador y abre `http://127.0.0.1:5179`.
-Este modo solo funciona en esta computadora. Para iniciar con autenticación,
-configura primero [Supabase y los permisos](AUTH_SETUP.md) y usa las dos
-terminales descritas a continuación.
+Abre `http://127.0.0.1:5173`. Este modo permite probar sin configurar Supabase y solo está disponible mediante el proxy local autorizado. No debe publicarse.
+El lanzador selecciona otro puerto para la API si el solicitado está ocupado. Si 5173 está ocupado, detén la ejecución anterior o usa `--port 5179` en modo local.
 
-### 1. Backend
+### Con autenticación
 
 ```powershell
-py -3.13 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+Copy-Item auth.local.example.json auth.local.json
+Copy-Item frontend/.env.example frontend/.env.local
+```
+
+Completa los valores con tu propio proyecto y su clave pública. Luego ejecuta:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/start_local.py --auth
+```
+
+El lanzador toma `auth.local.json` para ambos servicios; `frontend/.env.local` sirve también para ejecutar Vite por separado. Consulta [AUTH_SETUP.md](AUTH_SETUP.md) para configurar Google, URLs de retorno y vincular organizadores de viajes existentes. Las cuentas nuevas no reclaman viajes locales.
+
+## Validación
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 Set-Location backend
-alembic upgrade head
-uvicorn app.main:app --reload
+..\.venv\Scripts\python.exe -m unittest discover -s tests
+Set-Location ../frontend
+npm run build
+npm run lint
+node --test src/*.test.js config/*.test.js
 ```
 
-La API quedará disponible en `http://127.0.0.1:8000` y su documentación en
-`http://127.0.0.1:8000/docs`.
+Las pruebas cubren cálculos, validaciones, operaciones atómicas, reintentos, autorización, invitaciones y migraciones. La autenticación se simula en las pruebas del backend: no sustituye las pruebas reales de Google desde celulares.
 
-### Reiniciar una base anterior a la consolidación
+## Datos y configuración
 
-Las migraciones de desarrollo se consolidaron en `e579a0_initial_schema.py`.
-Una instalación vacía se crea con `alembic upgrade head`. Para una base con las
-revisiones antiguas, detén los servidores y ejecuta desde `backend`:
+- No se incluyen bases de datos, respaldos, archivos `.env`, credenciales ni dependencias instaladas. Los archivos de ejemplo contienen valores ficticios.
+- El Client Secret de Google se configura en Supabase, nunca en el frontend.
+- La clave Publishable es pública por diseño; los permisos se validan en la API.
+- Antes de actualizar una base existente, desde `backend` ejecuta `..\.venv\Scripts\python.exe -m scripts.upgrade_payments`: crea un respaldo y aplica las migraciones pendientes.
+- Las bases anteriores a la consolidación `e579a0` requieren el procedimiento explícito descrito en [AUTH_SETUP.md](AUTH_SETUP.md); no uses `alembic stamp` para simular una actualización del esquema.
 
-```powershell
-..\.venv\Scripts\python.exe -m scripts.reset_test_data --rebuild --confirm
-```
+## Límites actuales
 
-El comando crea un respaldo y reemplaza todos los datos por una base vacía con
-el esquema actual. No uses `alembic stamp` para actualizar una base antigua:
-eso no reconstruye sus tablas. Las nuevas modificaciones se añadirán como
-migraciones posteriores a esta base inicial. Se conservan las reglas:
-
-- borrar un gasto elimina sus participantes;
-- borrar un viaje elimina sus gastos e integrantes;
-- borrar una persona elimina sus participaciones, pertenencias y gastos pagados.
-
-### 2. Frontend
-
-```powershell
-Set-Location frontend
-npm install
-npm run dev
-```
-
-Abre `http://127.0.0.1:5173`.
-
-## Flujo de prueba
-
-1. En **Personas**, crea a quienes viajarán.
-2. Crea el viaje y selecciona a quien lo organiza.
-3. Agrega las demás personas al viaje.
-4. Registra un gasto, seleccionando quién pagó y quienes participan.
-5. Revisa el resumen para ver balances y pagos sugeridos.
+- Requiere conexión para consultar y registrar datos; no hay sincronización offline.
+- Compartir el resumen genera una copia de texto, no un enlace con datos en vivo.
+- Las invitaciones locales solo funcionan en la misma computadora.
+- No procesa transferencias bancarias: registra pagos realizados fuera de la app.
+- Antes de usarla durante un viaje falta verificar el despliegue, respaldos, restauración y el flujo completo con cuentas reales.

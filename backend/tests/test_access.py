@@ -98,6 +98,120 @@ class AccessTest(unittest.TestCase):
             owner = db.query(GroupMember).filter_by(group_id=result.json()['id'], role='owner').one()
             self.assertEqual(owner.user_id, 3)
 
+    def test_personal_invitation_scoped_to_trip_and_single_use(self):
+        path = '/group-members/group/1/access/5/invitation'
+        for actor in ('reader', 'writer', 'outsider'):
+            self.assertEqual(self.call(actor, 'POST', path).status_code, 403)
+        with Session(self.engine) as db:
+            db.add(GroupMember(group_id=2, user_id=5, role='member'))
+            db.commit()
+        first = self.call('owner', 'POST', path).json()['token']
+        token = self.call('owner', 'POST', path).json()['token']
+        self.assertEqual(self.call('outsider', 'POST', '/invitations/preview', {'token': first}).status_code, 409)
+        self.assertEqual(self.call('reader', 'POST', '/invitations/accept', {'token': token}).status_code, 409)
+        self.assertEqual(self.client.post('/invitations/accept', json={'token': token}).status_code, 401)
+        preview = self.call('outsider', 'POST', '/invitations/preview', {'token': token})
+        self.assertEqual(preview.json()['person'], 'Guest')
+        self.assertEqual(self.call('outsider', 'POST', '/invitations/accept', {'token': token}).status_code, 200)
+        self.assertEqual(self.call('outsider', 'POST', '/invitations/accept', {'token': token}).status_code, 409)
+        self.assertEqual(self.call('outsider', 'GET', '/groups/1/balances').status_code, 200)
+        self.assertEqual(self.call('outsider', 'POST', '/expenses/', self.expense()).status_code, 403)
+        access = {'login_email': 'outsider@example.com', 'can_register_expenses': True}
+        self.assertEqual(self.call('owner', 'PUT', '/group-members/group/1/access/5', access).status_code, 200)
+        self.assertEqual(self.call('outsider', 'POST', '/expenses/', self.expense()).status_code, 200)
+        self.assertEqual(self.call('outsider', 'POST', '/payments/', {'group_id':1}).status_code, 403)
+        with Session(self.engine) as db:
+            member = db.query(GroupMember).filter_by(group_id=1, user_id=5).one()
+            self.assertEqual(member.access_user_id, 4)
+            self.assertIsNone(member.invite_hash)
+            self.assertIsNone(db.query(GroupMember).filter_by(group_id=2, user_id=5).one().access_user_id)
+            self.assertIsNone(db.get(User, 5).auth_subject)
+
+    def test_cancelled_expired_and_removed_member_invitations_fail(self):
+        from datetime import datetime, timedelta
+        path = '/group-members/group/1/access/5/invitation'
+        token = self.call('owner', 'POST', path).json()['token']
+        self.assertEqual(self.call('owner', 'DELETE', path).status_code, 200)
+        self.assertEqual(self.call('outsider', 'POST', '/invitations/accept', {'token':token}).status_code, 409)
+        token = self.call('owner', 'POST', path).json()['token']
+        with Session(self.engine) as db:
+            member = db.query(GroupMember).filter_by(group_id=1, user_id=5).one()
+            self.assertNotEqual(member.invite_hash, token)
+            member.invite_expires = datetime.utcnow() - timedelta(seconds=1)
+            db.commit()
+        self.assertEqual(self.call('outsider', 'POST', '/invitations/accept', {'token':token}).status_code, 409)
+        token = self.call('owner', 'POST', path).json()['token']
+        self.assertEqual(self.call('owner', 'DELETE', '/group-members/group/1/people/5').status_code, 200)
+        self.assertEqual(self.call('outsider', 'POST', '/invitations/accept', {'token':token}).status_code, 409)
+
+    def test_delete_saved_person_checks_ownership_and_trip_membership(self):
+        person = self.call('owner', 'POST', '/users/', {'name': 'Error de captura'}).json()
+        path = f"/users/{person['id']}"
+        self.assertEqual(self.call('outsider', 'DELETE', path).status_code, 403)
+        self.assertEqual(self.client.delete(path).status_code, 401)
+        self.assertEqual(self.call('owner', 'DELETE', '/users/5').status_code, 409)
+        self.assertEqual(self.call('owner', 'DELETE', '/users/1').status_code, 403)
+        response = self.call('owner', 'DELETE', path)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {'deleted': True})
+        with Session(self.engine) as db:
+            self.assertIsNone(db.get(User, person['id']))
+            self.assertIsNotNone(db.get(User, 5))
+
+    def test_delete_saved_person_keeps_invited_accounts_and_transaction_references(self):
+        with Session(self.engine) as db:
+            db.add_all([User(id=6, name='Invitada', created_by_id=1, login_email='invite@example.com'),
+                        User(id=7, name='Pagadora', created_by_id=1)])
+            db.add(Expense(group_id=1, payer_id=1, description='Histórico', amount=10,
+                           payer_contributions={'1': '5', '7': '5'}, voided=True))
+            db.commit()
+        for uid in (6, 7):
+            self.assertEqual(self.call('owner', 'DELETE', f'/users/{uid}').status_code, 409)
+            with Session(self.engine) as db:
+                self.assertIsNotNone(db.get(User, uid))
+
+    def test_remove_member_is_owner_only_and_preserves_person_and_other_trips(self):
+        path = '/group-members/group/1/people/5'
+        with Session(self.engine) as db:
+            db.add(GroupMember(group_id=2, user_id=5, role='member'))
+            db.commit()
+        for actor in ('reader', 'writer', 'outsider'):
+            self.assertEqual(self.call(actor, 'DELETE', path).status_code, 403)
+        self.assertEqual(self.client.delete(path).status_code, 401)
+        self.assertEqual(self.call('owner', 'DELETE', '/group-members/group/1/people/1').status_code, 409)
+        for _ in range(2):
+            self.assertEqual(self.call('owner', 'DELETE', path).status_code, 200)
+        with Session(self.engine) as db:
+            self.assertIsNotNone(db.get(User, 5))
+            self.assertIsNone(db.query(GroupMember).filter_by(group_id=1, user_id=5).first())
+            self.assertIsNotNone(db.query(GroupMember).filter_by(group_id=2, user_id=5).first())
+        self.assertEqual(self.call('owner', 'DELETE', '/group-members/group/1/people/3').status_code, 200)
+        self.assertEqual(self.call('reader', 'GET', '/groups/1/balances').status_code, 403)
+
+    def test_remove_member_blocks_participants_and_multiple_payers_even_when_voided(self):
+        payload = self.expense()
+        payload.update(participants=[1, 3], payer_contributions={'1': '6.00', '5': '4.00'})
+        result = self.call('owner', 'POST', '/expenses/', payload)
+        self.assertEqual(result.status_code, 200, result.text)
+        for voided in (False, True):
+            if voided:
+                self.call('owner', 'POST', f"/expenses/{result.json()['id']}/void")
+            for uid in (3, 5):
+                response = self.call('owner', 'DELETE', f'/group-members/group/1/people/{uid}')
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(response.json()['detail'], 'Member has trip transactions')
+
+    def test_remove_member_blocks_both_payment_sides_even_when_voided(self):
+        payment = self.call('owner', 'POST', '/payments/', dict(
+            group_id=1, from_user_id=3, to_user_id=5, amount='2.00',
+            payment_date='2026-09-10', request_id=str(uuid4())))
+        self.assertEqual(payment.status_code, 200, payment.text)
+        for voided in (False, True):
+            if voided:
+                self.call('owner', 'POST', f"/payments/{payment.json()['id']}/void")
+            for uid in (3, 5):
+                self.assertEqual(self.call('owner', 'DELETE', f'/group-members/group/1/people/{uid}').status_code, 409)
+
     def test_extra_expense_id_cannot_redirect_creation_authorization(self):
         own = self.call('writer', 'POST', '/expenses/', self.expense()).json()['id']
         payload = self.expense()

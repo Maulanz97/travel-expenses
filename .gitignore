@@ -34,6 +34,13 @@ expenses-*.db.bak
 !.env.example
 !.env.*.example
 auth.local.json
+/.codex/
+# Private SSH keys and local credential bundles
+*.pem
+*.key
+id_rsa
+id_ed25519
+client_secret*.json
 
 # Local execution logs
 *.log

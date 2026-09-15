@@ -12,7 +12,7 @@ export default defineConfig(({ command, mode }) => {
     strictPort: true,
     proxy: {
       '/api': {
-        target: `http://127.0.0.1:${command === 'serve' && process.env.LOCAL_DEV_AUTH === '1' ? process.env.LOCAL_DEV_API_PORT || '8000' : '8000'}`,
+        target: `http://127.0.0.1:${command === 'serve' ? process.env.LOCAL_DEV_API_PORT || '8000' : '8000'}`,
         changeOrigin: true,
         configure(proxy) {
           proxy.on('proxyReq', (request) => {

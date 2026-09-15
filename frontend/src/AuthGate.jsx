@@ -4,6 +4,8 @@ import { api, errorMessage, setTokenProvider } from './api'
 import { setPendingExpenseOwner } from './pendingExpense'
 import './App.css'
 import { localDevelopment } from './localDevelopment'
+import InvitationGate from './InvitationGate'
+import { captureInvitation } from './invitationStorage'
 
 if (authClient && !localDevelopment) setTokenProvider(async () => {
   const { data, error } = await authClient.auth.getSession()
@@ -33,6 +35,7 @@ function LocalGate({ children }) {
 }
 
 function SupabaseGate({ children }) {
+  const [invitation, setInvitation] = useState(captureInvitation)
   const [session, setSession] = useState(null)
   const [ready, setReady] = useState(false)
   const [actor, setActor] = useState(null)
@@ -68,7 +71,7 @@ function SupabaseGate({ children }) {
 
   if (!authClient) return <main className="auth-shell"><h1>viajeclaro</h1><p>El acceso está pendiente de configuración. Conecta el proyecto de Supabase para habilitar Google y correo.</p></main>
   if (!ready) return <main className="auth-shell"><p role="status">Comprobando sesión…</p></main>
-  if (session && actor?.subject === sessionId && mode !== 'password') return children(actor.profile)
+  if (session && actor?.subject === sessionId && mode !== 'password') return invitation ? <InvitationGate token={invitation} profile={actor.profile} onDone={() => setInvitation('')} /> : children(actor.profile)
 
   const redirect = location.origin + location.pathname
   async function submit(event) {
@@ -101,6 +104,7 @@ function SupabaseGate({ children }) {
   }
   return <main className="auth-shell"><div className="brand">viaje<span>claro</span></div>
     <h1>{mode === 'signup' ? 'Crea tu cuenta' : mode === 'reset' ? 'Recupera tu acceso' : mode === 'password' ? 'Elige una nueva contraseña' : 'Entra a tus viajes'}</h1>
+    {invitation && <p>Inicia sesión para revisar y aceptar tu invitación personal. Usa este mismo navegador para completar el acceso.</p>}
     {error && <p className="alert error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}
     {session && mode !== 'password' ? <><p>{error ? 'No se pudieron cargar tus viajes.' : 'Cargando tu cuenta…'}</p><button className="secondary" onClick={() => setAttempt(n => n + 1)}>Reintentar</button><button className="secondary" onClick={() => authClient.auth.signOut()}>Cerrar sesión</button></> : <>
       {['login', 'signup'].includes(mode) && <button type="button" className="secondary" disabled={busy} onClick={google}>Continuar con Google</button>}

@@ -1,5 +1,21 @@
 # Activar acceso y permisos
 
+## Iniciar con Supabase en esta computadora
+
+Con `auth.local.json` configurado en la raíz (variables `SUPABASE_URL` y
+`SUPABASE_PUBLISHABLE_KEY`), detén el lanzador anterior con Ctrl+C y ejecuta:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/start_local.py --auth
+```
+
+Abre `http://127.0.0.1:5173`. Esta opción inicia frontend y backend con la misma
+configuración y desactiva el acceso sin sesión. El archivo `auth.local.json` y
+`frontend/.env.local` están excluidos de Git. Autoriza en Supabase las URLs
+`http://127.0.0.1:5173/` y `http://127.0.0.1:5173/?recovery=1`.
+El acceso con una cuenta nueva no reclama automáticamente los viajes locales;
+consulta «Viajes existentes» antes de vincular un organizador anterior.
+
 ## Seguir usando la app en esta computadora
 
 Desde la raíz del proyecto, ejecuta:
@@ -60,6 +76,25 @@ El script crea un respaldo y se niega a reemplazar una cuenta vinculada. No asoc
 Los intentos de gasto pendientes nuevos se guardan por cuenta y viaje. Los intentos locales anteriores a esta integración permanecen en su clave anterior; deben revisarse antes de volver a registrar esos gastos. Un organizador puede recuperar una operación antigua con su identificador original mediante la API, sin duplicarla.
 
 ## Permisos
+
+### Enlace personal
+
+En **Integrantes → Acceso al viaje → Permisos de la persona**, el organizador
+puede crear y copiar un enlace sin reservar un correo. La invitación vence en
+7 días, es de un solo uso y se puede cancelar. Generar otra invalida la anterior.
+Si ya hay un correo reservado, elimina primero esa reserva desde los permisos;
+las cuentas ya vinculadas no se reasignan por enlace.
+
+La persona abre el enlace, inicia sesión y confirma la invitación. Conserva su
+cuenta y se vincula exclusivamente al integrante de ese viaje, sin fusionar
+personas ni modificar repartos. Recibe solo consulta; el organizador puede
+habilitar después «Puede registrar gastos». Comparte el enlace únicamente con
+su destinatario: quien lo tenga puede aceptarlo. El token se guarda como hash en
+la base de datos y se transporta en el fragmento del enlace.
+
+Para compartir con otros dispositivos se necesita una dirección pública de la
+app. Las direcciones localhost y 127.0.0.1 solo sirven en la computadora local.
+El flujo de acceso conserva la invitación en la sesión del mismo navegador.
 
 - Cada cuenta ve únicamente sus viajes y las personas de esos viajes (o las personas que creó).
 - Quien crea un viaje es su organizador, aunque se intente enviar otro organizador a la API.

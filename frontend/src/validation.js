@@ -6,6 +6,14 @@ export function validateAmount(value) {
   }
 }
 const messages = {
+  'Member already has access': 'Esta persona ya tiene acceso o un correo reservado. Usa sus permisos existentes o elimina el correo reservado antes de crear un enlace.',
+  'Invitation unavailable': 'Este enlace venció, fue cancelado o ya se utilizó. Solicita uno nuevo a quien organiza; si acabas de aceptarlo, continúa a tus viajes.',
+  'Already in invited trip': 'Tu cuenta ya pertenece a este viaje. Continúa a tus viajes o pide a quien organiza que revise el integrante invitado.',
+  'Person has account access': 'Esta persona tiene una cuenta o un acceso vinculado y no se puede eliminar desde el directorio.',
+  'Person still belongs to trips': 'Esta persona todavía pertenece a un viaje. Quítala de sus viajes desde Integrantes antes de eliminarla del directorio.',
+  'Person has saved transactions': 'Esta persona tiene gastos o pagos asociados. Se conserva para mantener esos registros.',
+  'Organizer cannot be removed': 'No se puede quitar a quien organiza el viaje.',
+  'Member has trip transactions': 'Esta persona participa en gastos o pagos del viaje, incluso si están anulados. Se conserva como integrante para mantener esos registros.',
   'Access email required': 'Indica un correo de acceso antes de conceder el permiso.',
   'Access email already linked': 'Este correo ya está vinculado a otra persona. No se fusionaron las cuentas.',
   'Linked account cannot be reassigned': 'Esta cuenta no se puede reasignar desde este viaje.',
