@@ -1,8 +1,8 @@
 # Docker Compose en local
 
 Ejecutar los comandos desde la raíz del repositorio, con Docker Desktop activo.
-Esta configuración publica la app únicamente en esta computadora. El despliegue
-en Oracle necesitará configurar HTTPS, dominio y red por separado.
+Esta configuración publica la app únicamente en loopback. Para Oracle, consultar
+[la guía de despliegue](DEPLOYMENT.md), que agrega Caddy, HTTPS y reglas de red.
 
 ## Configuración
 

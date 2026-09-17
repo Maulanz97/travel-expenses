@@ -30,7 +30,7 @@ El frontend presenta importes en MXN. El backend valida permisos y calcula repar
 
 Supabase gestiona la autenticación; los viajes y gastos se guardan en SQLite. Las invitaciones vinculan una cuenta al integrante de un viaje sin fusionar personas ni alterar gastos. Sus tokens se almacenan como hashes.
 
-El proyecto está en desarrollo. Incluye Docker Compose para ejecutar frontend y API en local, con SQLite en un volumen persistente. Consulta [la guía de Docker](DOCKER.md) para configurar y arrancar los servicios. CI/CD y el despliegue en Oracle Cloud siguen pendientes. El acceso desde otros dispositivos requiere desplegar frontend y API con HTTPS y datos persistentes.
+El proyecto está en desarrollo. Incluye Docker Compose para frontend y API, con SQLite en un volumen persistente. El despliegue personal en Oracle ARM64 utiliza Caddy para HTTPS y systemd para respaldos diarios verificados. Consulta [la guía de Docker](DOCKER.md) y [el despliegue y operación en Oracle](DEPLOYMENT.md). CI/CD, alertas y copias externas automáticas siguen pendientes.
 
 ## Probar en Windows / PowerShell
 
@@ -94,4 +94,4 @@ Las pruebas cubren cálculos, validaciones, operaciones atómicas, reintentos, a
 - Compartir el resumen genera una copia de texto, no un enlace con datos en vivo.
 - Las invitaciones locales solo funcionan en la misma computadora.
 - No procesa transferencias bancarias: registra pagos realizados fuera de la app.
-- Antes de usarla durante un viaje falta verificar el despliegue, respaldos, restauración y el flujo completo con cuentas reales.
+- Se verificaron acceso desde celular, persistencia tras reinicio y respaldos con restauración en memoria. Quedan pendientes la prueba completa con un acompañante y un ensayo de recuperación de la app en un entorno aislado.
