@@ -1,0 +1,12 @@
+[Unit]
+Description=Verified SQLite backup for Viaje Claro
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/ubuntu/apps/travel-expenses
+ExecStart=/usr/bin/python3 /home/ubuntu/apps/travel-expenses/scripts/backup_sqlite.py --destination /home/ubuntu/backups/viaje-claro --retention-days 14
+UMask=0077
+TimeoutStartSec=15min

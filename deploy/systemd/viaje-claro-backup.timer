@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Viaje Claro backup at 03:00 Mexico City
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 America/Mexico_City
+Persistent=true
+AccuracySec=1min
+OnBootSec=10min
+Unit=viaje-claro-backup.service
+
+[Install]
+WantedBy=timers.target

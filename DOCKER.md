@@ -84,3 +84,54 @@ importantes, hacer una copia de seguridad.
 
 Referencias: [variables de Compose](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/)
 y [volúmenes externos](https://docs.docker.com/reference/compose-file/volumes/).
+
+## Respaldos diarios en Oracle
+
+Los archivos de `deploy/systemd` suponen Ubuntu, el repositorio en
+`/home/ubuntu/apps/travel-expenses` y la API de Compose en ejecución.
+El script utiliza la API de respaldo de SQLite sin detener la app, verifica
+integridad, claves foráneas y versión de migración, y publica la copia solo
+si todo termina correctamente. Los nombres usan UTC.
+
+Después de subir estos archivos a GitHub, ejecutar por SSH:
+
+```bash
+cd ~/apps/travel-expenses
+git pull --ff-only
+sudo install -d -o ubuntu -g ubuntu -m 700 /home/ubuntu/backups/viaje-claro
+sudo install -m 644 deploy/systemd/viaje-claro-backup.service /etc/systemd/system/
+sudo install -m 644 deploy/systemd/viaje-claro-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start viaje-claro-backup.service
+sudo journalctl -u viaje-claro-backup.service --no-pager -n 20
+```
+
+Tras comprobar el mensaje `Verified backup`, activar la programación:
+
+```bash
+sudo systemctl enable --now viaje-claro-backup.timer
+systemctl list-timers viaje-claro-backup.timer --all
+```
+
+Se ejecuta a las 03:00 de America/Mexico_City, con precisión de un minuto,
+independientemente de la zona horaria del servidor. La lista de timers puede
+mostrar la hora equivalente en UTC. `Persistent=true` recupera una ejecución
+diaria pendiente. También se programa una ejecución diez minutos después de
+cada arranque para dar tiempo a que la API esté disponible.
+
+Solo se eliminan archivos con el patrón de nombres de estos respaldos y más
+de 14 días de antigüedad, después de crear una copia nueva válida. El servicio
+usa root para acceder a Docker, pero las copias conservan el propietario de
+la carpeta de destino y permisos 600. Los errores se registran en journalctl;
+no se envían alertas automáticamente.
+
+Esta automatización guarda copias en el mismo servidor. La copia externa
+mediante SCP sigue siendo manual. No respalda la configuración de Supabase,
+el archivo de entorno ni Caddy. La prueba de integridad no sustituye una
+prueba de restauración de la app en un entorno separado.
+
+Pruebas locales del script:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s scripts -p "test_backup_sqlite.py"
+```
