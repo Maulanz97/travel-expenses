@@ -1,0 +1,41 @@
+name: viaje-claro
+
+services:
+  viaje-claro-api:
+    build: ./backend
+    env_file:
+      - ./backend/.env.docker
+    environment:
+      DATABASE_URL: sqlite:////data/expenses.db
+      APP_ENV: production
+      LOCAL_DEV_AUTH: "0"
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "127.0.0.1:8002:8000"
+    volumes:
+      - data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        VITE_SUPABASE_URL: ${SUPABASE_URL:?Configura SUPABASE_URL en backend/.env.docker}
+        VITE_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Configura SUPABASE_PUBLISHABLE_KEY en backend/.env.docker}
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      viaje-claro-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  data:
+    external: true
+    name: viaje-claro-data
