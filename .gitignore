@@ -42,6 +42,20 @@ id_rsa
 id_ed25519
 client_secret*.json
 
+# Terraform local state, provider cache, and private variable values
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfplan
+*.plan
+
 # Local execution logs
 *.log
 
