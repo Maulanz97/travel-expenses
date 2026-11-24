@@ -89,6 +89,19 @@ resource "aws_key_pair" "app" {
   public_key = file(pathexpand(var.public_key_path))
 }
 
+resource "aws_ebs_volume" "app_data" {
+  availability_zone = aws_subnet.public.availability_zone
+  type              = "gp3"
+  size              = var.data_volume_size_gib
+  encrypted         = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  tags = { Name = "${var.project_name}-data" }
+}
+
 resource "aws_instance" "app" {
   ami                         = data.aws_ssm_parameter.ubuntu_arm64.value
   instance_type               = var.instance_type
@@ -96,7 +109,9 @@ resource "aws_instance" "app" {
   vpc_security_group_ids      = [aws_security_group.app.id]
   key_name                    = aws_key_pair.app.key_name
   associate_public_ip_address = true
-  user_data                   = file("${path.module}/bootstrap.sh")
+  user_data = templatefile("${path.module}/bootstrap.sh.tftpl", {
+    data_volume_id = replace(aws_ebs_volume.app_data.id, "-", "")
+  })
 
   root_block_device {
     volume_type           = "gp3"
@@ -110,4 +125,10 @@ resource "aws_instance" "app" {
   }
 
   tags = { Name = "${var.project_name}-app" }
+}
+
+resource "aws_volume_attachment" "app_data" {
+  device_name = "/dev/sdf"
+  volume_id   = aws_ebs_volume.app_data.id
+  instance_id = aws_instance.app.id
 }

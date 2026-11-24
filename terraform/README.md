@@ -10,6 +10,8 @@ run against an AWS account.
 - A dedicated VPC, one public subnet, an Internet Gateway, and a route table.
 - A security group allowing HTTP/HTTPS publicly and SSH only from one IPv4 CIDR.
 - One Ubuntu 24.04 ARM64 EC2 instance with encrypted 20 GiB gp3 root storage.
+- A separate encrypted gp3 EBS data volume for SQLite, protected from accidental
+  Terraform destruction and mounted at `/srv/viaje-claro-data`.
 - The local SSH public key registered with AWS. The private key stays local.
 - First-boot installation of Docker Engine, the Compose plugin, and Caddy from
   their official APT repositories. Caddy initially proxies HTTP to
@@ -24,23 +26,49 @@ pricing for the chosen region and instance type before creating resources.
 
 The existing `compose.yaml` and Dockerfiles can be reused. Caddy runs on the
 Ubuntu host and proxies to the web container at `127.0.0.1:5173`; the Compose
-file already keeps its web and API ports on loopback. The `viaje-claro-data`
-volume is external, so create it on the new host before starting Compose. Do
-not point it at Oracle or assume it contains Oracle's SQLite data. The bootstrap
-does not clone the repository, write environment secrets, start Compose, or
-copy application data. After a DNS name is selected, change the Caddy site
-address from `:80` to that hostname to enable automatic HTTPS.
+file already keeps its web and API ports on loopback. On AWS, use
+`compose.aws.yaml` to bind `/data` to the separately mounted EBS data volume.
+Do not use the Oracle Docker volume name on AWS or assume a fresh volume already
+contains SQLite data. The bootstrap formats the EBS volume only when it has no
+filesystem; it refuses to format a non-ext4 volume. It does not clone the repo,
+write environment secrets, start Compose, or copy application data. After a DNS
+name is selected, change the Caddy site address from `:80` to that hostname to
+enable automatic HTTPS.
 
 The bootstrap script runs only on the first boot of a newly created instance.
 Its output is written to `/var/log/travel-expenses-bootstrap.log` (and the
 cloud-init output log). Updating the script later does not automatically rerun
 its commands on an existing instance.
 
+`prevent_destroy` on the EBS data volume makes `terraform destroy` stop until
+that protection is deliberately removed. The volume still has ongoing storage
+charges while it exists, even if detached. Take a separate verified backup
+before any restore or infrastructure change.
+
 Before a production move, take and verify an Oracle SQLite backup, restore it
 to a separate AWS volume, and validate the app using a temporary hostname or
 IP. Keep Oracle and its DNS configuration untouched until the AWS copy has
 been checked. Supabase authentication redirect URLs will need the eventual
 AWS hostname when a cutover is explicitly chosen.
+
+## Restore the verified SQLite backup on AWS (manual step)
+
+After the AWS host has been created and bootstrapped, copy the verified backup
+to the host without putting it in Git. Stop the application before restoring.
+Keep the original file unchanged, and copy it to the mounted data volume as
+`expenses.db`; then set ownership/permissions and verify the database before
+starting Compose. The AWS Compose command must include both files:
+
+```bash
+sudo docker compose --env-file backend/.env.docker \
+  -f compose.yaml -f compose.aws.yaml config --quiet
+sudo docker compose --env-file backend/.env.docker \
+  -f compose.yaml -f compose.aws.yaml up -d --build
+```
+
+Prepare the exact restore commands for the selected backup and volume before
+running them. Do not restore over an active database, and do not change Oracle's
+DNS or delete its data during validation.
 
 ## Prepare locally
 

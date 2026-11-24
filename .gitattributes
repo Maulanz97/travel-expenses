@@ -1,2 +1,3 @@
 # Keep shell scripts executable by Linux when checked out or edited on Windows.
 *.sh text eol=lf
+*.tftpl text eol=lf

@@ -1,0 +1,6 @@
+services:
+  viaje-claro-api:
+    volumes:
+      - type: bind
+        source: /srv/viaje-claro-data
+        target: /data

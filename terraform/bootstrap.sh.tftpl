@@ -28,6 +28,41 @@ apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin caddy
 
+# The attachment can finish shortly after cloud-init starts. Match the EBS
+# volume by its NVMe serial instead of assuming a device name on Nitro EC2.
+expected_volume_id="${data_volume_id}"
+data_device=""
+for attempt in $(seq 1 60); do
+  for candidate in /dev/nvme*n1; do
+    [ -b "$candidate" ] || continue
+    serial="$(lsblk -ndo SERIAL "$candidate" | tr -d '-')"
+    if [ "$serial" = "$expected_volume_id" ]; then
+      data_device="$candidate"
+      break 2
+    fi
+  done
+  sleep 5
+done
+
+if [ -z "$data_device" ]; then
+  echo "Attached EBS data volume $expected_volume_id was not found; refusing to continue." >&2
+  exit 1
+fi
+
+filesystem="$(blkid -o value -s TYPE "$data_device" || true)"
+if [ -z "$filesystem" ]; then
+  mkfs.ext4 -F "$data_device"
+elif [ "$filesystem" != "ext4" ]; then
+  echo "Expected an ext4 data volume, found $filesystem; refusing to format it." >&2
+  exit 1
+fi
+
+install -d -m 0750 /srv/viaje-claro-data
+volume_uuid="$(blkid -o value -s UUID "$data_device")"
+if ! grep -q "UUID=$volume_uuid " /etc/fstab; then
+  printf 'UUID=%s /srv/viaje-claro-data ext4 defaults,nofail 0 2\n' "$volume_uuid" >> /etc/fstab
+fi
+mount /srv/viaje-claro-data
 systemctl enable --now docker
 
 # Serve HTTP on the instance IP for initial smoke checks. Replace :80 with the

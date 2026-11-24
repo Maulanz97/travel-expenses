@@ -9,6 +9,17 @@ variable "instance_type" {
   default     = "t4g.small"
 }
 
+variable "data_volume_size_gib" {
+  description = "Size of the separate encrypted EBS volume for SQLite data. Increase this if the verified backup plus growth needs more space."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.data_volume_size_gib >= 10
+    error_message = "Use at least 10 GiB for the application data volume."
+  }
+}
+
 variable "ssh_ingress_cidr" {
   description = "Your public IPv4 address in CIDR notation, for example 203.0.113.10/32. Never use 0.0.0.0/0 for SSH."
   type        = string
